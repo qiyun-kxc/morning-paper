@@ -1,3 +1,5 @@
 today.txt
 cron.log
 shijing.json
+__pycache__/
+*.pyc

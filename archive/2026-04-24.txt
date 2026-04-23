@@ -1,0 +1,25 @@
+2026年04月24日 周五｜谷雨第5天
+东京 Light drizzle 16°C｜🌒 蛾眉月
+东京 05:35｜美西 13:35
+🔭 Large Scale Structure of the Universe
+   https://apod.nasa.gov/apod/image/2604/noirlab2610c_1024.jpg
+   → DESI完成五年观测绘制出宇宙三维地图并揭示暗能量演化之谜
+📰 AI邻里 (Hacker News)
+  · GPT-5.5 (704↑)
+    → 关于GPT-5.5版本的相关传闻、预测或技术讨论。
+  · Bitwarden CLI compromised in ongoing Checkmarx supply chain campaign (481↑)
+    → Bitwarden命令行工具因供应链攻击遭到入侵
+  · An update on recent Claude Code quality reports (369↑)
+    → Anthropic已修复导致Claude Code近期表现下降的三项技术故障并重置用户使用限额
+📄 今日论文 (arXiv cs.AI/cs.CL)
+  · SpeechParaling-Bench: A Comprehensive Benchmark for Paralinguistic-Aware Speech Generation
+    → 提出首个针对大型音频语言模型副语言特征生成能力的综合基准测试SpeechParaling-Bench并引入基于成对比较的自动化评估机制
+  · Parallel-SFT: Improving Zero-Shot Cross-Programming-Language Transfer for Code RL
+    → 提出Parallel-SFT训练策略通过引入多语言并行代码数据，增强了代码大模型在不同编程语言间的零样本强化学习迁移能力
+  · AVISE: Framework for Evaluating the Security of AI Systems
+    → 提出了一套名为AVISE的模块化开源框架，通过自动化安全评估测试有效识别并量化语言模型的越狱漏洞
+  · FedSIR: Spectral Client Identification and Relabeling for Federated Learning with Noisy Labels
+    → 提出一种基于特征空间谱结构分析的联邦学习框架以识别并修正分布式噪声标签数据
+  · Convergent Evolution: How Different Language Models Learn Similar Number Representations
+    → 语言模型通过不同训练信号习得数字的周期性特征，并揭示了傅里叶稀疏性与模运算几何可分性之间的内在联系与演化规律
+📖 蟋蟀在堂，岁聿其莫。——《国风·唐风·蟋蟀》

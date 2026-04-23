@@ -1,11 +1,24 @@
 #!/bin/bash
-# 栖云小报 — cron 是送报员，不是闹钟
+# ============================================
+# 栖云小报 v2 — cron 是送报员，不是闹钟
 # 每天凌晨跑一次，把"今天的世界"放在门口
+# ============================================
 
-OUTPUT="/home/ubuntu/morning-paper/today.txt"
-SHIJING="/home/ubuntu/morning-paper/shijing.json"
+REPO_DIR="/home/ubuntu/morning-paper"
+OUTPUT="${REPO_DIR}/today.txt"
+ARCHIVE_DIR="${REPO_DIR}/archive"
+SHIJING="${REPO_DIR}/shijing.json"
 
-# === 日期 ===
+# 加载 Gemini API Key（复用 vision-mcp）
+source /opt/vision-mcp/secrets.env
+export GEMINI_API_KEY
+
+# 确保存档目录存在
+mkdir -p "$ARCHIVE_DIR"
+
+# =====================
+# 第一层：时间感
+# =====================
 DATE_FMT=$(TZ=Asia/Tokyo date '+%Y年%m月%d日')
 WEEKDAY_NUM=$(TZ=Asia/Tokyo date '+%u')
 case $WEEKDAY_NUM in
@@ -45,7 +58,14 @@ get_solar_term() {
     fi
 }
 
-# === 月相（天文算法） ===
+# =====================
+# 第二层：天气
+# =====================
+WEATHER=$(curl -s --max-time 5 "wttr.in/Tokyo?format=%C+%t" 2>/dev/null | tr -d '+' || echo "获取失败")
+
+# =====================
+# 第三层：月相
+# =====================
 get_moon_phase() {
     local known_new_moon=$(date -d "2024-01-11 11:57:00 UTC" '+%s' 2>/dev/null)
     local now=$(date -u '+%s')
@@ -67,25 +87,57 @@ get_moon_phase() {
     fi
 }
 
-# === NASA APOD（每日天文图片） ===
+# =====================
+# 第四层：双时区
+# =====================
+TOKYO_TIME=$(TZ=Asia/Tokyo date '+%H:%M')
+US_WEST=$(TZ=America/Los_Angeles date '+%H:%M')
+
+# =====================
+# 第五层：天空（APOD + 摘要）
+# =====================
 get_apod() {
-    local json=$(curl -s --max-time 10 "https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY" 2>/dev/null)
-    if [ -n "$json" ]; then
-        local title=$(echo "$json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('title',''))" 2>/dev/null)
-        local url=$(echo "$json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('url',''))" 2>/dev/null)
-        if [ -n "$title" ]; then
-            echo "🔭 ${title}"
-            [ -n "$url" ] && echo "   ${url}"
-            return
-        fi
-    fi
-    echo "🔭 今日天文图片获取失败"
+    python3 << 'PYEOF' 2>/dev/null
+import sys, json, urllib.request, os
+sys.path.insert(0, "/home/ubuntu/morning-paper")
+from summarize import summarize
+
+try:
+    req = urllib.request.Request(
+        "https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY",
+        headers={"User-Agent": "QiyunMorningPaper/2.0"}
+    )
+    with urllib.request.urlopen(req, timeout=10) as r:
+        data = json.load(r)
+
+    title = data.get("title", "")
+    url = data.get("url", "")
+    explanation = data.get("explanation", "")
+
+    if title:
+        print(f"🔭 {title}")
+        if url:
+            print(f"   {url}")
+        if explanation:
+            s = summarize(explanation, "用一句简洁的中文概括这段NASA天文图片描述，直接输出概括，不要加任何前缀或标点开头")
+            if s:
+                print(f"   → {s}")
+    else:
+        print("🔭 今日天文图片获取失败")
+except Exception as e:
+    print("🔭 今日天文图片获取失败")
+    print(f"   [APOD error: {e}]", file=sys.stderr)
+PYEOF
 }
 
-# === AI邻里（Hacker News AI热帖） ===
+# =====================
+# 第六层：AI邻里（HN + 摘要）
+# =====================
 get_hn_ai() {
     python3 << 'PYEOF' 2>/dev/null
-import urllib.request, json
+import sys, json, urllib.request, re, html
+sys.path.insert(0, "/home/ubuntu/morning-paper")
+from summarize import summarize
 
 keywords = [
     'AI', 'LLM', 'GPT', 'Claude', 'Anthropic', 'OpenAI', 'Gemini', 'Google AI',
@@ -95,10 +147,30 @@ keywords = [
     'Hugging Face', 'open source model', 'foundation model', 'multimodal'
 ]
 
+def strip_html(raw):
+    text = re.sub(r'<script[^>]*>.*?</script>', '', raw, flags=re.DOTALL|re.IGNORECASE)
+    text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL|re.IGNORECASE)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = html.unescape(text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+def fetch_page_text(url, max_chars=3000):
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; QiyunPaper/2.0)"
+        })
+        with urllib.request.urlopen(req, timeout=8) as r:
+            raw = r.read(50000).decode("utf-8", errors="ignore")
+        text = strip_html(raw)
+        return text[:max_chars] if text else ""
+    except:
+        return ""
+
 try:
     req = urllib.request.Request(
         'https://hacker-news.firebaseio.com/v0/topstories.json',
-        headers={'User-Agent': 'QiyunMorningPaper/1.0'}
+        headers={'User-Agent': 'QiyunMorningPaper/2.0'}
     )
     with urllib.request.urlopen(req, timeout=15) as r:
         top_ids = json.load(r)[:50]
@@ -113,10 +185,30 @@ try:
                 timeout=5
             ) as r:
                 story = json.load(r)
+
             title = story.get('title', '')
             score = story.get('score', 0)
+            story_url = story.get('url', '')
+
             if any(kw.lower() in title.lower() for kw in keywords):
-                results.append(f'  · {title} ({score}↑)')
+                summary = ""
+                if story_url:
+                    page_text = fetch_page_text(story_url)
+                    if len(page_text) > 100:
+                        summary = summarize(
+                            page_text,
+                            "用一句简洁的中文概括这篇科技新闻的核心内容，直接输出概括，不要加任何前缀或标点开头"
+                        )
+                if not summary:
+                    summary = summarize(
+                        title,
+                        "这是一条Hacker News上的AI相关帖子标题，用一句简洁的中文概括它可能在说什么，直接输出概括，不要加前缀"
+                    )
+
+                entry = f"  · {title} ({score}↑)"
+                if summary:
+                    entry += f"\n    → {summary}"
+                results.append(entry)
         except:
             continue
 
@@ -126,19 +218,106 @@ try:
             print(line)
     else:
         print('📰 AI邻里：今日HN暂无AI热帖')
-except:
+except Exception as e:
     print('📰 AI邻里获取失败')
+    print(f'   [HN error: {e}]', file=sys.stderr)
 PYEOF
 }
 
-# === 天气 ===
-WEATHER=$(curl -s --max-time 5 "wttr.in/Tokyo?format=%C+%t" 2>/dev/null | tr -d '+' || echo "获取失败")
+# =====================
+# 第七层：今日论文（arXiv）
+# =====================
+get_arxiv() {
+    python3 << 'PYEOF' 2>/dev/null
+import sys, json, urllib.request, xml.etree.ElementTree as ET
+sys.path.insert(0, "/home/ubuntu/morning-paper")
+from summarize import summarize
 
-# === 时区 ===
-TOKYO_TIME=$(TZ=Asia/Tokyo date '+%H:%M')
-US_WEST=$(TZ=America/Los_Angeles date '+%H:%M')
+ARXIV_NS = {"atom": "http://www.w3.org/2005/Atom"}
 
-# === 特殊日期 ===
+try:
+    url = "http://export.arxiv.org/api/query?search_query=cat:cs.AI+OR+cat:cs.CL&sortBy=submittedDate&sortOrder=descending&max_results=5"
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "QiyunMorningPaper/2.0"
+    })
+    with urllib.request.urlopen(req, timeout=15) as r:
+        xml_data = r.read().decode("utf-8")
+
+    root = ET.fromstring(xml_data)
+    entries = root.findall("atom:entry", ARXIV_NS)
+
+    if not entries:
+        print("📄 今日论文：arXiv暂无更新")
+        sys.exit(0)
+
+    results = []
+    for entry in entries[:5]:
+        title = entry.find("atom:title", ARXIV_NS)
+        abstract = entry.find("atom:summary", ARXIV_NS)
+
+        if title is not None:
+            t = " ".join(title.text.strip().split())
+            a = abstract.text.strip() if abstract is not None else ""
+
+            summary = ""
+            if a:
+                summary = summarize(
+                    a,
+                    "用一句简洁的中文概括这篇AI/NLP论文的核心贡献，直接输出概括，不要加任何前缀或标点开头"
+                )
+
+            line = f"  · {t}"
+            if summary:
+                line += f"\n    → {summary}"
+            results.append(line)
+
+    if results:
+        print("📄 今日论文 (arXiv cs.AI/cs.CL)")
+        for line in results:
+            print(line)
+    else:
+        print("📄 今日论文：解析失败")
+
+except Exception as e:
+    print("📄 今日论文获取失败")
+    print(f"   [arXiv error: {e}]", file=sys.stderr)
+PYEOF
+}
+
+# =====================
+# 第八层：每日一言（诗经）
+# =====================
+get_poem() {
+    python3 << PYEOF 2>/dev/null
+import json, datetime
+
+try:
+    with open("${SHIJING}") as f:
+        poems = json.load(f)
+
+    doy = datetime.datetime.now().timetuple().tm_yday
+    idx = (doy - 1) % len(poems)
+    poem = poems[idx]
+
+    title = poem.get("title", "")
+    chapter = poem.get("chapter", "")
+    section = poem.get("section", "")
+    content = poem.get("content", [])
+
+    first_line = content[0] if content else ""
+    parts = first_line.split("。")
+    verse = parts[0] + "。" if parts[0] else first_line
+
+    source = f"《{chapter}·{section}·{title}》"
+    print(f"📖 {verse}——{source}")
+except:
+    print("📖 诗经获取失败")
+PYEOF
+}
+
+# =====================
+# 特殊日期
+# =====================
 get_special_day() {
     case "$MONTH-$DAY" in
         1-1) echo "元旦" ;; 2-14) echo "情人节" ;; 3-8) echo "国际妇女节" ;;
@@ -149,41 +328,15 @@ get_special_day() {
     esac
 }
 
-# === 诗经·每日一篇（305篇轮换） ===
-get_poem() {
-    python3 << PYEOF 2>/dev/null
-import json, datetime
-
-try:
-    with open("${SHIJING}") as f:
-        poems = json.load(f)
-    
-    doy = datetime.datetime.now().timetuple().tm_yday
-    idx = (doy - 1) % len(poems)
-    poem = poems[idx]
-    
-    title = poem.get("title", "")
-    chapter = poem.get("chapter", "")
-    section = poem.get("section", "")
-    content = poem.get("content", [])
-    
-    first_line = content[0] if content else ""
-    parts = first_line.split("。")
-    verse = parts[0] + "。" if parts[0] else first_line
-    
-    source = f"《{chapter}·{section}·{title}》"
-    print(f"📖 {verse}——{source}")
-except:
-    print("📖 诗经获取失败")
-PYEOF
-}
-
-# === 汇编小报 ===
+# =====================
+# 汇编小报
+# =====================
 SOLAR_TERM=$(get_solar_term)
 MOON=$(get_moon_phase)
 SPECIAL=$(get_special_day)
 APOD=$(get_apod)
 HN=$(get_hn_ai)
+ARXIV=$(get_arxiv)
 POEM=$(get_poem)
 
 {
@@ -193,8 +346,17 @@ POEM=$(get_poem)
     [ -n "$SPECIAL" ] && echo "📅 ${SPECIAL}"
     echo "${APOD}"
     echo "${HN}"
+    echo "${ARXIV}"
     echo "${POEM}"
 } > "$OUTPUT"
 
+# =====================
+# 存档
+# =====================
+TODAY_FILE=$(TZ=Asia/Tokyo date '+%Y-%m-%d')
+cp "$OUTPUT" "${ARCHIVE_DIR}/${TODAY_FILE}.txt"
+
 echo "小报已投递:"
 cat "$OUTPUT"
+echo ""
+echo "已存档: archive/${TODAY_FILE}.txt"
