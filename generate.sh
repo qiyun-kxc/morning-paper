@@ -9,6 +9,8 @@ OUTPUT="${REPO_DIR}/today.txt"
 ARCHIVE_DIR="${REPO_DIR}/archive"
 SHIJING="${REPO_DIR}/shijing.json"
 
+# API Keys
+NASA_API_KEY="lMtSqP9ZMgLov6uZou6Figm9KAcjzcqBax3CghCG"
 # 加载 Gemini API Key（复用 vision-mcp）
 source /opt/vision-mcp/secrets.env
 export GEMINI_API_KEY
@@ -59,9 +61,46 @@ get_solar_term() {
 }
 
 # =====================
-# 第二层：天气
+# 第二层：天气（Open-Meteo，免费无需key，带重试）
 # =====================
-WEATHER=$(curl -s --max-time 5 "wttr.in/Tokyo?format=%C+%t" 2>/dev/null | tr -d '+' || echo "获取失败")
+get_weather() {
+    python3 << 'PYEOF' 2>/dev/null
+import json, urllib.request, time
+
+WMO_CODES = {
+    0: "晴", 1: "大致晴", 2: "多云", 3: "阴",
+    45: "雾", 48: "凝霜雾",
+    51: "小毛毛雨", 53: "毛毛雨", 55: "密毛毛雨",
+    56: "冻毛毛雨", 57: "密冻毛毛雨",
+    61: "小雨", 63: "中雨", 65: "大雨",
+    66: "冻雨", 67: "大冻雨",
+    71: "小雪", 73: "中雪", 75: "大雪", 77: "雪粒",
+    80: "小阵雨", 81: "阵雨", 82: "大阵雨",
+    85: "小阵雪", 86: "大阵雪",
+    95: "雷暴", 96: "冰雹雷暴", 99: "强冰雹雷暴"
+}
+
+url = "https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&current=temperature_2m,weather_code&timezone=Asia/Tokyo"
+
+for attempt in range(3):
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "QiyunMorningPaper/2.0"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.load(r)
+        code = data["current"]["weather_code"]
+        temp = round(data["current"]["temperature_2m"])
+        desc = WMO_CODES.get(code, f"代码{code}")
+        print(f"{desc} {temp}°C")
+        break
+    except:
+        if attempt < 2:
+            time.sleep(3)
+        else:
+            print("天气获取失败")
+PYEOF
+}
+
+WEATHER=$(get_weather)
 
 # =====================
 # 第三层：月相
@@ -97,14 +136,14 @@ US_WEST=$(TZ=America/Los_Angeles date '+%H:%M')
 # 第五层：天空（APOD + 摘要）
 # =====================
 get_apod() {
-    python3 << 'PYEOF' 2>/dev/null
+    python3 << PYEOF 2>/dev/null
 import sys, json, urllib.request, os
 sys.path.insert(0, "/home/ubuntu/morning-paper")
 from summarize import summarize
 
 try:
     req = urllib.request.Request(
-        "https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY",
+        "https://api.nasa.gov/planetary/apod?api_key=${NASA_API_KEY}",
         headers={"User-Agent": "QiyunMorningPaper/2.0"}
     )
     with urllib.request.urlopen(req, timeout=10) as r:
