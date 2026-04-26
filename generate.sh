@@ -80,23 +80,56 @@ WMO_CODES = {
     95: "雷暴", 96: "冰雹雷暴", 99: "强冰雹雷暴"
 }
 
-url = "https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&current=temperature_2m,weather_code&timezone=Asia/Tokyo"
+# MET Norway symbol_code → 中文
+MET_SYMBOLS = {
+    "clearsky": "晴", "fair": "大致晴", "partlycloudy": "多云",
+    "cloudy": "阴", "fog": "雾",
+    "lightrain": "小雨", "rain": "中雨", "heavyrain": "大雨",
+    "lightrainshowers": "小阵雨", "rainshowers": "阵雨", "heavyrainshowers": "大阵雨",
+    "lightsnow": "小雪", "snow": "中雪", "heavysnow": "大雪",
+    "sleet": "雨夹雪", "lightssleetshowers": "小雨夹雪",
+    "rainandthunder": "雷雨", "heavyrainandthunder": "强雷暴",
+}
 
-for attempt in range(3):
+def try_open_meteo():
+    url = "https://api.open-meteo.com/v1/forecast?latitude=35.6762&longitude=139.6503&current=temperature_2m,weather_code&timezone=Asia/Tokyo"
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "QiyunMorningPaper/2.0"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.load(r)
+            code = data["current"]["weather_code"]
+            temp = round(data["current"]["temperature_2m"])
+            desc = WMO_CODES.get(code, f"代码{code}")
+            return f"{desc} {temp}°C"
+        except:
+            if attempt < 2:
+                time.sleep(3)
+    return None
+
+def try_met_norway():
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "QiyunMorningPaper/2.0"})
+        url = "https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=35.6762&lon=139.6503"
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "QiyunMorningPaper/2.0 github.com/qiyun-kxc/morning-paper"
+        })
         with urllib.request.urlopen(req, timeout=10) as r:
             data = json.load(r)
-        code = data["current"]["weather_code"]
-        temp = round(data["current"]["temperature_2m"])
-        desc = WMO_CODES.get(code, f"代码{code}")
-        print(f"{desc} {temp}°C")
-        break
+        ts = data["properties"]["timeseries"][0]["data"]
+        temp = round(ts["instant"]["details"]["air_temperature"])
+        symbol = ts.get("next_1_hours", ts.get("next_6_hours", {})).get("summary", {}).get("symbol_code", "")
+        # symbol_code 格式如 "clearsky_day" → 取下划线前的基础部分
+        base = symbol.rsplit("_", 1)[0] if "_" in symbol else symbol
+        desc = MET_SYMBOLS.get(base, symbol if symbol else "未知")
+        return f"{desc} {temp}°C"
     except:
-        if attempt < 2:
-            time.sleep(3)
-        else:
-            print("天气获取失败")
+        return None
+
+# 主逻辑：Open-Meteo → MET Norway → 失败
+result = try_open_meteo()
+if not result:
+    result = try_met_norway()
+print(result if result else "天气获取失败")
 PYEOF
 }
 
