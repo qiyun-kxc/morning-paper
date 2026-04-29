@@ -297,63 +297,59 @@ PYEOF
 }
 
 # =====================
-# 第七层：今日论文（arXiv）
+# 第七层：今日论文（arXiv 蓄水池）
 # =====================
 get_arxiv() {
-    python3 << 'PYEOF' 2>/dev/null
-import sys, json, urllib.request, xml.etree.ElementTree as ET
+    python3 << 'ARXIV_PYEOF' 2>/dev/null
+import sys, subprocess, re
 sys.path.insert(0, "/home/ubuntu/morning-paper")
 from summarize import summarize
 
-ARXIV_NS = {"atom": "http://www.w3.org/2005/Atom"}
-
 try:
-    url = "http://export.arxiv.org/api/query?search_query=cat:cs.AI+OR+cat:cs.CL&sortBy=submittedDate&sortOrder=descending&max_results=5"
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "QiyunMorningPaper/2.0"
-    })
-    with urllib.request.urlopen(req, timeout=15) as r:
-        xml_data = r.read().decode("utf-8")
+    result = subprocess.run(
+        ["python3", "/home/ubuntu/morning-paper/pool/select_daily_papers.py"],
+        capture_output=True, text=True, timeout=60
+    )
+    output = result.stdout
 
-    root = ET.fromstring(xml_data)
-    entries = root.findall("atom:entry", ARXIV_NS)
+    papers = []
+    blocks = re.split(r'### Paper \d+', output)
+    for block in blocks:
+        if not block.strip():
+            continue
+        title_m = re.search(r'Title:\s*(.+)', block)
+        abstract_m = re.search(r'Abstract:\s*(.+?)(?=\nURL:|\nCategories:|\nQualityScore:|\Z)', block, re.DOTALL)
+        if title_m:
+            papers.append({
+                'title': title_m.group(1).strip(),
+                'abstract': abstract_m.group(1).strip() if abstract_m else ''
+            })
 
-    if not entries:
-        print("📄 今日论文：arXiv暂无更新")
+    if not papers:
+        print("\u00f0\u009f\u0093\u0084 今日论文：候选池为空")
         sys.exit(0)
 
     results = []
-    for entry in entries[:5]:
-        title = entry.find("atom:title", ARXIV_NS)
-        abstract = entry.find("atom:summary", ARXIV_NS)
+    for p in papers[:5]:
+        summary = ""
+        if p['abstract']:
+            summary = summarize(
+                p['abstract'],
+                "用一句简洁的中文概括这篇AI/NLP论文的核心贡献，直接输出概括，不要加任何前缀或标点开头"
+            )
+        line = f"  \u00b7 {p['title']}"
+        if summary:
+            line += f"\n    \u2192 {summary}"
+        results.append(line)
 
-        if title is not None:
-            t = " ".join(title.text.strip().split())
-            a = abstract.text.strip() if abstract is not None else ""
-
-            summary = ""
-            if a:
-                summary = summarize(
-                    a,
-                    "用一句简洁的中文概括这篇AI/NLP论文的核心贡献，直接输出概括，不要加任何前缀或标点开头"
-                )
-
-            line = f"  · {t}"
-            if summary:
-                line += f"\n    → {summary}"
-            results.append(line)
-
-    if results:
-        print("📄 今日论文 (arXiv cs.AI/cs.CL)")
-        for line in results:
-            print(line)
-    else:
-        print("📄 今日论文：解析失败")
+    print("\u00f0\u009f\u0093\u0084 今日论文 (arXiv cs.AI/cs.CL)")
+    for line in results:
+        print(line)
 
 except Exception as e:
-    print("📄 今日论文获取失败")
-    print(f"   [arXiv error: {e}]", file=sys.stderr)
-PYEOF
+    print("\u00f0\u009f\u0093\u0084 今日论文获取失败")
+    print(f"   [pool error: {e}]", file=sys.stderr)
+ARXIV_PYEOF
 }
 
 # =====================
