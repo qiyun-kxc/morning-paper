@@ -1,0 +1,10 @@
+archive/
+cron.log
+today.txt
+__pycache__/
+*.pyc
+generate.sh.bak
+pool/arxiv_candidates.db
+pool/arxiv_candidates.db-journal
+node_modules/
+pool/refill.log
